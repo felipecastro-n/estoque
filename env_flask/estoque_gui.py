@@ -64,23 +64,50 @@ class EstoqueApp:
         self.clear_frames()
         self.frame_lista.pack(padx=10, pady=10, fill="both", expand=True)
 
-        tk.Button(self.frame_lista, text="Voltar", command=self.build_menu).pack(anchor="w")
+        top_frame = tk.Frame(self.frame_lista)
+        top_frame.pack(fill="x")
+        tk.Button(top_frame, text="Voltar", command=self.build_menu).pack(side="left")
+        tk.Label(top_frame, text="Buscar peça por nome/código OEM:").pack(side="left", padx=5)
+        self.entry_busca = tk.Entry(top_frame)
+        self.entry_busca.pack(side="left")
+        tk.Button(top_frame, text="Buscar", command=self.buscar_peca).pack(side="left", padx=5)
 
-        columns = ("id", "nome", "codigo_oem", "descricao", "localizacao", "quantidade", "preco_custo", "preco_venda", "modelo_carro", "ano_carro")
-        tree = ttk.Treeview(self.frame_lista, columns=columns, show="headings")
+        # Campo para buscar por UID RFID
+        tk.Label(top_frame, text="ou UID RFID:").pack(side="left", padx=5)
+        self.entry_rfid = tk.Entry(top_frame, width=20)
+        self.entry_rfid.pack(side="left")
+        tk.Button(top_frame, text="Buscar RFID", command=self.buscar_por_rfid).pack(side="left", padx=5)
+
+        columns = ("id", "nome", "codigo_oem", "descricao", "localizacao", "quantidade", "preco_custo", "preco_venda", "modelo_carro", "ano_carro", "rfid_uid")
+        self.tree = ttk.Treeview(self.frame_lista, columns=columns, show="headings")
         for col in columns:
-            tree.heading(col, text=col)
-            tree.column(col, width=100, anchor="center")
-        tree.pack(fill="both", expand=True)
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=100, anchor="center")
+        self.tree.pack(fill="both", expand=True)
 
+        # Botão para associar RFID à peça selecionada
+        btn_rfid = tk.Button(self.frame_lista, text="Associar RFID à peça selecionada", command=self.associar_rfid)
+        btn_rfid.pack(pady=5)
+
+        self.carregar_pecas()
+
+    def carregar_pecas(self, filtro=None):
+        # Limpa a tabela
+        for item in self.tree.get_children():
+            self.tree.delete(item)
         try:
             headers = {"Authorization": f"Bearer {self.token}"}
             resp = requests.get(f"{API_URL}/pecas", headers=headers)
             if resp.status_code == 200:
-                for peca in resp.json():
-                    tree.insert("", "end", values=(
+                pecas = resp.json()
+                if filtro:
+                    filtro = filtro.lower()
+                    pecas = [p for p in pecas if filtro in p["nome"].lower() or filtro in p["codigo_oem"].lower()]
+                for peca in pecas:
+                    self.tree.insert("", "end", values=(
                         peca["id"], peca["nome"], peca["codigo_oem"], peca["descricao"], peca["localizacao"],
-                        peca["quantidade"], peca["preco_custo"], peca["preco_venda"], peca["modelo_carro"], peca["ano_carro"]
+                        peca["quantidade"], peca["preco_custo"], peca["preco_venda"], peca["modelo_carro"], peca["ano_carro"],
+                        peca.get("rfid_uid", "")
                     ))
             else:
                 messagebox.showerror("Erro", "Não foi possível listar as peças.\nFaça login novamente.")
@@ -88,6 +115,52 @@ class EstoqueApp:
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao conectar à API: {e}")
             self.logout()
+    def buscar_por_rfid(self):
+        uid = self.entry_rfid.get().strip()
+        if not uid:
+            messagebox.showwarning("Aviso", "Digite o UID RFID para buscar.")
+            return
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"}
+            resp = requests.get(f"{API_URL}/pecas/rfid/{uid}", headers=headers)
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+            if resp.status_code == 200:
+                peca = resp.json()
+                self.tree.insert("", "end", values=(
+                    peca["id"], peca["nome"], peca["codigo_oem"], peca["descricao"], peca["localizacao"],
+                    peca["quantidade"], peca["preco_custo"], peca["preco_venda"], peca["modelo_carro"], peca["ano_carro"],
+                    peca.get("rfid_uid", "")
+                ))
+            else:
+                messagebox.showinfo("Info", "Peça não encontrada para este UID.")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao conectar à API: {e}")
+
+    def associar_rfid(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Aviso", "Selecione uma peça na lista.")
+            return
+        peca_id = self.tree.item(selected[0])["values"][0]
+        uid = tk.simpledialog.askstring("Associar RFID", "Digite o UID RFID a associar à peça:")
+        if not uid:
+            return
+        try:
+            headers = {"Authorization": f"Bearer {self.token}"}
+            resp = requests.patch(f"{API_URL}/pecas/{peca_id}/rfid", json={"rfid_uid": uid}, headers=headers)
+            if resp.status_code == 200:
+                messagebox.showinfo("Sucesso", "RFID associado à peça!")
+                self.carregar_pecas()
+            else:
+                erro = resp.json().get("error", "Erro ao associar RFID.")
+                messagebox.showerror("Erro", erro)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao conectar à API: {e}")
+
+    def buscar_peca(self):
+        termo = self.entry_busca.get().strip()
+        self.carregar_pecas(filtro=termo)
 
     def login(self):
         usuario = self.entry_user.get()

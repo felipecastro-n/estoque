@@ -187,6 +187,32 @@ def entrada_peca(peca_id):
     conn.close()
     return jsonify({'message': 'Entrada registrada com sucesso.'}), 200
 
+@bp.route('/pecas/<int:peca_id>/rfid', methods=['PATCH'])
+@estoquista_or_admin_required
+def associar_rfid(peca_id):
+    data = request.get_json()
+    rfid_uid = data.get('rfid_uid')
+    if not rfid_uid:
+        return jsonify({'error': 'UID não informado.'}), 400
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('UPDATE pecas SET rfid_uid = ? WHERE id = ?', (rfid_uid, peca_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'RFID associado à peça.'}), 200
+
+@bp.route('/pecas/rfid/<rfid_uid>', methods=['GET'])
+@jwt_required()
+def buscar_por_rfid(rfid_uid):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('SELECT * FROM pecas WHERE rfid_uid = ?', (rfid_uid,))
+    peca = cur.fetchone()
+    conn.close()
+    if not peca:
+        return jsonify({'error': 'Peça não encontrada.'}), 404
+    return jsonify(dict(peca)), 200
+
 # --- Rotas de Usuário ---
 @bp.route('/usuarios', methods=['GET'])
 @admin_required
